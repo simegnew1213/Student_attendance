@@ -96,18 +96,31 @@ export default function StudentRegistration() {
     
     setIsSubmitting(true)
     
+    // Debug: Log the data being sent
+    console.log('Sending student data:', formData)
+    
     try {
-      await http.post('/students', formData)
+      const response = await http.post('/students', formData)
+      console.log('Registration success:', response.data)
       setSubmitSuccess(true)
       setTimeout(() => {
         navigate('/')
       }, 2000)
     } catch (error) {
+      console.error('Registration error:', error)
+      let errorMessage = 'Failed to register student. Please try again.'
+      
       if (error.response?.data?.message) {
-        setErrors({ submit: error.response.data.message })
-      } else {
-        setErrors({ submit: 'Failed to register student. Please try again.' })
+        errorMessage = error.response.data.message
+      } else if (error.response?.status === 409) {
+        errorMessage = 'Student ID already exists. Please use a different ID.'
+      } else if (error.response?.status === 400) {
+        errorMessage = 'Invalid data provided. Please check all fields.'
+      } else if (error.code === 'ERR_NETWORK') {
+        errorMessage = 'Cannot connect to server. Please check if the backend is running.'
       }
+      
+      setErrors({ submit: errorMessage })
     } finally {
       setIsSubmitting(false)
     }

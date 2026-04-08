@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import jsQR from 'jsqr'
 import { QRCodeSVG } from 'qrcode.react'
 import { http } from '../api/http'
 
@@ -9,6 +10,20 @@ export default function AttendanceScanner() {
   const [messageType, setMessageType] = useState('')
   const [scannedStudent, setScannedStudent] = useState(null)
   const [recentScans, setRecentScans] = useState([])
+  const [cameraOpen, setCameraOpen] = useState(false)
+  const [cameraError, setCameraError] = useState('')
+  const videoRef = useRef(null)
+  const canvasRef = useRef(null)
+  const streamRef = useRef(null)
+  const rafRef = useRef(null)
+  const detectorRef = useRef(null)
+  const lastDetectedRef = useRef({ value: '', ts: 0 })
+
+  useEffect(() => {
+    return () => {
+      stopCamera()
+    }
+  }, [])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -77,6 +92,126 @@ export default function AttendanceScanner() {
     }, 100)
   }
 
+  const stopCamera = () => {
+    setCameraOpen(false)
+    setCameraError('')
+
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+    }
+
+    if (videoRef.current) {
+      try {
+        videoRef.current.pause()
+      } catch {
+      }
+      videoRef.current.srcObject = null
+    }
+
+    if (streamRef.current) {
+      for (const track of streamRef.current.getTracks()) {
+        track.stop()
+      }
+      streamRef.current = null
+    }
+  }
+
+  const startCamera = async () => {
+    setCameraError('')
+
+    if (!('mediaDevices' in navigator) || !navigator.mediaDevices.getUserMedia) {
+      setCameraError('Camera is not supported in this browser.')
+      return
+    }
+
+    try {
+      stopCamera()
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false,
+      })
+
+      streamRef.current = stream
+      setCameraOpen(true)
+
+      if (!detectorRef.current) {
+        if ('BarcodeDetector' in window) {
+          detectorRef.current = new window.BarcodeDetector({ formats: ['qr_code'] })
+        } else {
+          detectorRef.current = null
+        }
+      }
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        await videoRef.current.play()
+      }
+
+      const scanLoop = async () => {
+        if (!videoRef.current) return
+
+        if (videoRef.current.readyState >= 2) {
+          try {
+            let raw = ''
+
+            if (detectorRef.current) {
+              const barcodes = await detectorRef.current.detect(videoRef.current)
+              raw = barcodes?.[0]?.rawValue || ''
+            } else {
+              const canvas = canvasRef.current
+              const video = videoRef.current
+              if (canvas) {
+                const w = video.videoWidth || 640
+                const h = video.videoHeight || 360
+                canvas.width = w
+                canvas.height = h
+                const ctx = canvas.getContext('2d', { willReadFrequently: true })
+                if (ctx) {
+                  ctx.drawImage(video, 0, 0, w, h)
+                  const imageData = ctx.getImageData(0, 0, w, h)
+                  const code = jsQR(imageData.data, w, h)
+                  raw = code?.data || ''
+                }
+              }
+            }
+
+            if (raw) {
+              const now = Date.now()
+              const last = lastDetectedRef.current
+              if (raw !== last.value || now - last.ts > 1500) {
+                lastDetectedRef.current = { value: raw, ts: now }
+                const id = String(raw).trim().toUpperCase()
+                if (id) {
+                  setStudentId(id)
+                  setTimeout(() => {
+                    const form = document.getElementById('scan-form')
+                    if (form) form.requestSubmit()
+                  }, 50)
+                }
+              }
+            }
+          } catch {}
+        }
+
+        rafRef.current = requestAnimationFrame(scanLoop)
+      }
+
+      rafRef.current = requestAnimationFrame(scanLoop)
+    } catch (err) {
+      const name = err?.name || ''
+      if (name === 'NotAllowedError') {
+        setCameraError('Camera permission denied. Please allow camera access and try again.')
+      } else if (name === 'NotFoundError') {
+        setCameraError('No camera device found.')
+      } else {
+        setCameraError('Failed to start camera. Please try again.')
+      }
+      stopCamera()
+    }
+  }
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       {/* Header */}
@@ -132,6 +267,48 @@ export default function AttendanceScanner() {
                 )}
               </button>
             </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              {!cameraOpen ? (
+                <button
+                  type="button"
+                  onClick={startCamera}
+                  className="px-4 py-2 rounded-xl bg-white/80 hover:bg-white border border-white/60 shadow-sm transition-colors"
+                >
+                  Scan QR with Camera
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={stopCamera}
+                  className="px-4 py-2 rounded-xl bg-white/80 hover:bg-white border border-white/60 shadow-sm transition-colors"
+                >
+                  Stop Camera
+                </button>
+              )}
+
+              <div className="text-xs text-gray-500">
+                Tip: QR should contain the Student ID (e.g. CS2024001)
+              </div>
+            </div>
+
+            {cameraError ? (
+              <div className="mt-3 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm animate-fadeIn">
+                {cameraError}
+              </div>
+            ) : null}
+
+            {cameraOpen ? (
+              <div className="mt-4 overflow-hidden rounded-2xl border border-white/50 shadow-sm bg-black/5">
+                <video
+                  ref={videoRef}
+                  className="w-full aspect-video object-cover"
+                  playsInline
+                  muted
+                />
+                <canvas ref={canvasRef} className="hidden" />
+              </div>
+            ) : null}
           </div>
         </form>
 

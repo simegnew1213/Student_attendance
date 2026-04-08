@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom'
+import HelpAssistant from './HelpAssistant'
 
 function NavItem({ to, label, icon }) {
   return (
@@ -124,6 +125,7 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+      <HelpAssistant />
     </div>
   )
 }

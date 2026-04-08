@@ -18,7 +18,22 @@ export function createApp() {
   app.use(helmet())
   app.use(
     cors({
-      origin: env.corsOrigin,
+      origin: (origin, callback) => {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true)
+        
+        // Allow any localhost origin in development
+        if (origin.startsWith('http://localhost:')) {
+          return callback(null, true)
+        }
+        
+        // Check against configured origins
+        if (env.corsOrigin.includes(origin)) {
+          return callback(null, true)
+        }
+        
+        callback(new Error('Not allowed by CORS'))
+      },
       credentials: true,
     }),
   )
