@@ -3,7 +3,10 @@ import { http } from '../api/http'
 
 export default function AttendanceHistory() {
   const [attendance, setAttendance] = useState([])
+  const [absentStudents, setAbsentStudents] = useState([])
   const [loading, setLoading] = useState(true)
+  const [showAbsent, setShowAbsent] = useState(false)
+  const [presentCount, setPresentCount] = useState(0)
   const [filters, setFilters] = useState({
     date: new Date().toISOString().split('T')[0],
     department: '',
@@ -28,7 +31,10 @@ export default function AttendanceHistory() {
 
   useEffect(() => {
     fetchAttendance()
-  }, [filters, pagination.page])
+    if (showAbsent) {
+      fetchAbsentStudents()
+    }
+  }, [filters, pagination.page, showAbsent])
 
   const fetchAttendance = async () => {
     setLoading(true)
@@ -42,6 +48,7 @@ export default function AttendanceHistory() {
 
       const response = await http.get(`/attendance?${params}`)
       setAttendance(response.data.data || [])
+      setPresentCount(response.data.data?.length || 0)
       setPagination(prev => ({
         ...prev,
         total: response.data.meta?.total || 0,
@@ -53,9 +60,30 @@ export default function AttendanceHistory() {
     }
   }
 
+  const fetchAbsentStudents = async () => {
+    try {
+      const params = new URLSearchParams()
+      if (filters.date) params.append('date', filters.date)
+      if (filters.department) params.append('department', filters.department)
+
+      const response = await http.get(`/attendance/absent?${params}`)
+      setAbsentStudents(response.data.data || [])
+    } catch (error) {
+      console.error('Failed to fetch absent students:', error)
+    }
+  }
+
   const handleFilterChange = (e) => {
     const { name, value } = e.target
     setFilters(prev => ({ ...prev, [name]: value }))
+    setPagination(prev => ({ ...prev, page: 1 }))
+  }
+
+  const setPresetDate = (days) => {
+    const date = new Date()
+    date.setDate(date.getDate() - days)
+    const dateStr = date.toISOString().split('T')[0]
+    setFilters(prev => ({ ...prev, date: dateStr }))
     setPagination(prev => ({ ...prev, page: 1 }))
   }
 
@@ -142,6 +170,35 @@ export default function AttendanceHistory() {
           </svg>
           Filters
         </h2>
+
+        {/* Preset Date Buttons */}
+        <div className="flex flex-wrap gap-2 mb-4">
+          <button
+            onClick={() => setPresetDate(0)}
+            className="px-3 py-1 text-sm rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 transition-colors"
+          >
+            Today
+          </button>
+          <button
+            onClick={() => setPresetDate(1)}
+            className="px-3 py-1 text-sm rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
+          >
+            Yesterday
+          </button>
+          <button
+            onClick={() => setPresetDate(7)}
+            className="px-3 py-1 text-sm rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
+          >
+            Last 7 Days
+          </button>
+          <button
+            onClick={() => setPresetDate(30)}
+            className="px-3 py-1 text-sm rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
+          >
+            Last 30 Days
+          </button>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Date</label>
@@ -194,12 +251,30 @@ export default function AttendanceHistory() {
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-6">
             <div>
-              <p className="text-sm text-gray-600">Total Records</p>
-              <p className="text-2xl font-bold text-gray-900">{pagination.total}</p>
+              <p className="text-sm text-gray-600">Present on {filters.date}</p>
+              <p className="text-2xl font-bold text-green-600">{presentCount}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-600">Absent on {filters.date}</p>
+              <p className="text-2xl font-bold text-red-600">{absentStudents.length}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-600">Total Students</p>
+              <p className="text-2xl font-bold text-gray-900">{presentCount + absentStudents.length}</p>
             </div>
             <div>
               <p className="text-sm text-gray-600">Page {pagination.page} of {Math.ceil(pagination.total / pagination.pageSize) || 1}</p>
             </div>
+            <button
+              onClick={() => setShowAbsent(!showAbsent)}
+              className={`px-4 py-2 rounded-xl font-medium transition-all duration-300 ${
+                showAbsent
+                  ? 'bg-red-100 text-red-700 border-2 border-red-300'
+                  : 'bg-green-100 text-green-700 border-2 border-green-300'
+              }`}
+            >
+              {showAbsent ? 'Show Present' : 'Show Absent'}
+            </button>
           </div>
           <div className="flex space-x-2">
             <button
@@ -297,6 +372,72 @@ export default function AttendanceHistory() {
           </table>
         </div>
       </div>
+
+      {/* Absent Students Section */}
+      {showAbsent && (
+        <div className="glass rounded-2xl shadow-xl overflow-hidden border-2 border-red-200">
+          <div className="bg-gradient-to-r from-red-500 to-orange-600 px-6 py-4">
+            <h2 className="text-xl font-bold text-white flex items-center">
+              <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              Absent Students ({absentStudents.length})
+            </h2>
+            <p className="text-red-100 text-sm mt-1">Students who haven't been marked present for the selected date</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-red-50">
+                <tr>
+                  <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-700">Student</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-700">Student ID</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-700">Department</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-700">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {absentStudents.length > 0 ? (
+                  absentStudents.map((student) => (
+                    <tr key={student.studentId} className="hover:bg-red-50 transition-colors">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <div className="w-8 h-8 bg-gradient-to-r from-red-500 to-orange-600 rounded-full flex items-center justify-center text-white text-sm font-medium mr-3">
+                            {student.fullName?.charAt(0) || '?'}
+                          </div>
+                          <span className="text-sm font-medium text-gray-900">
+                            {student.fullName}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="text-sm text-gray-900 font-mono">{student.studentId}</span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="text-sm text-gray-900">{student.department}</span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {getStatusBadge('Absent')}
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="4" className="px-6 py-12 text-center">
+                      <div className="text-gray-500">
+                        <svg className="w-12 h-12 mx-auto mb-4 text-green-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <p className="text-lg font-medium">All students are present!</p>
+                        <p className="text-sm mt-1">Great job tracking attendance today.</p>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

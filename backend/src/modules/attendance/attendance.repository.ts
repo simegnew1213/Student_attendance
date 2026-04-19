@@ -61,4 +61,27 @@ export class AttendanceRepository {
       },
     })
   }
+
+  async findAbsentStudents(date: Date, department?: string) {
+    const where: any = {}
+    if (department) where.department = department
+
+    const allStudents = await this.prisma.student.findMany({
+      where,
+      select: { studentId: true, fullName: true, department: true },
+    })
+
+    const presentStudentIds = await this.prisma.attendance
+      .findMany({
+        where: { date },
+        select: { studentId: true },
+      })
+      .then((records) => records.map((r) => r.studentId))
+
+    const absentStudents = allStudents.filter(
+      (student) => !presentStudentIds.includes(student.studentId)
+    )
+
+    return absentStudents
+  }
 }

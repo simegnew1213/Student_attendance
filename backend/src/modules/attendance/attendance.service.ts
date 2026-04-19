@@ -50,4 +50,19 @@ export class AttendanceService {
       pageSize: params.pageSize,
     })
   }
+
+  async getAbsentStudents(date?: string, department?: string) {
+    let targetDate: Date
+    if (date) {
+      const parsed = new Date(date)
+      if (Number.isNaN(parsed.getTime())) {
+        throw new Error('Invalid date format')
+      }
+      targetDate = startOfDayUtc(parsed)
+    } else {
+      targetDate = startOfDayUtc(new Date())
+    }
+
+    return this.attendanceRepo.findAbsentStudents(targetDate, department)
+  }
 }

@@ -36,4 +36,13 @@ export class AttendanceController {
       },
     })
   }
+
+  getAbsent = async (req: Request, res: Response) => {
+    const query = (req as any).validatedQuery || {}
+    const date = this.firstQueryValue(query.date) as string | undefined
+    const department = this.firstQueryValue(query.department) as string | undefined
+
+    const absentStudents = await this.service.getAbsentStudents(date, department)
+    res.json({ data: absentStudents })
+  }
 }

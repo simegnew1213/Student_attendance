@@ -9,15 +9,18 @@ export default function AttendanceScanner() {
   const [message, setMessage] = useState('')
   const [messageType, setMessageType] = useState('')
   const [scannedStudent, setScannedStudent] = useState(null)
+  const [attendanceStatus, setAttendanceStatus] = useState(null)
   const [recentScans, setRecentScans] = useState([])
   const [cameraOpen, setCameraOpen] = useState(false)
   const [cameraError, setCameraError] = useState('')
+  const [uploadingQR, setUploadingQR] = useState(false)
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const streamRef = useRef(null)
   const rafRef = useRef(null)
   const detectorRef = useRef(null)
   const lastDetectedRef = useRef({ value: '', ts: 0 })
+  const fileInputRef = useRef(null)
 
   useEffect(() => {
     return () => {
@@ -27,31 +30,33 @@ export default function AttendanceScanner() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    
+
     if (!studentId.trim()) {
       setMessage('Please enter a student ID')
       setMessageType('error')
       return
     }
-    
+
     setIsSubmitting(true)
     setMessage('')
     setScannedStudent(null)
-    
+    setAttendanceStatus(null)
+
     try {
       const response = await http.post('/attendance/scan', { studentId: studentId.trim().toUpperCase() })
       const attendanceData = response.data.data
-      
+
       setScannedStudent({
         name: attendanceData.student?.fullName || 'Unknown',
         id: attendanceData.studentId,
         department: attendanceData.student?.department || 'Unknown',
         time: new Date().toLocaleTimeString(),
       })
-      
+
+      setAttendanceStatus('Present')
       setMessage('Attendance recorded successfully!')
       setMessageType('success')
-      
+
       // Add to recent scans
       setRecentScans(prev => [
         {
@@ -63,17 +68,23 @@ export default function AttendanceScanner() {
         },
         ...prev.slice(0, 4) // Keep only last 5 scans
       ])
-      
+
       setStudentId('')
-      
+
       // Clear success message after 5 seconds to give time to see QR
       setTimeout(() => {
         setMessage('')
         setScannedStudent(null)
+        setAttendanceStatus(null)
       }, 5000)
-      
+
     } catch (error) {
-      if (error.response?.data?.message) {
+      if (error.response?.status === 409) {
+        // Already marked present
+        setAttendanceStatus('Already Present')
+        setMessage('Student is already marked as present for today.')
+        setMessageType('warning')
+      } else if (error.response?.data?.message) {
         setMessage(error.response.data.message)
       } else {
         setMessage('Failed to record attendance. Please try again.')
@@ -90,6 +101,77 @@ export default function AttendanceScanner() {
       const form = document.getElementById('scan-form')
       if (form) form.requestSubmit()
     }, 100)
+  }
+
+  const handleQRUpload = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+
+    setUploadingQR(true)
+    const reader = new FileReader()
+
+    reader.onload = (event) => {
+      const img = new Image()
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        const ctx = canvas.getContext('2d')
+        canvas.width = img.width
+        canvas.height = img.height
+        ctx.drawImage(img, 0, 0)
+
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+        const code = jsQR(imageData.data, canvas.width, canvas.height)
+
+        if (code && code.data) {
+          let studentId = ''
+          try {
+            const data = JSON.parse(code.data)
+            if (data && data.studentId) {
+              studentId = data.studentId.trim().toUpperCase()
+              console.log('Parsed student data from uploaded QR:', data)
+            }
+          } catch {
+            studentId = String(code.data).trim().toUpperCase()
+            console.log('Parsed student ID from uploaded QR:', studentId)
+          }
+
+          if (studentId) {
+            setStudentId(studentId)
+            setTimeout(() => {
+              const form = document.getElementById('scan-form')
+              if (form) form.requestSubmit()
+            }, 100)
+          } else {
+            setMessage('Could not decode student ID from QR code')
+            setMessageType('error')
+          }
+        } else {
+          setMessage('No QR code found in the uploaded image')
+          setMessageType('error')
+        }
+
+        setUploadingQR(false)
+        e.target.value = '' // Reset file input
+      }
+
+      img.onerror = () => {
+        setMessage('Failed to load the uploaded image')
+        setMessageType('error')
+        setUploadingQR(false)
+        e.target.value = ''
+      }
+
+      img.src = event.target.result
+    }
+
+    reader.onerror = () => {
+      setMessage('Failed to read the uploaded file')
+      setMessageType('error')
+      setUploadingQR(false)
+      e.target.value = ''
+    }
+
+    reader.readAsDataURL(file)
   }
 
   const stopCamera = () => {
@@ -182,9 +264,23 @@ export default function AttendanceScanner() {
               const last = lastDetectedRef.current
               if (raw !== last.value || now - last.ts > 1500) {
                 lastDetectedRef.current = { value: raw, ts: now }
-                const id = String(raw).trim().toUpperCase()
-                if (id) {
-                  setStudentId(id)
+                
+                let studentId = ''
+                try {
+                  // Try to parse as JSON (new format with full student data)
+                  const data = JSON.parse(raw)
+                  if (data && data.studentId) {
+                    studentId = data.studentId.trim().toUpperCase()
+                    console.log('Parsed student data from QR:', data)
+                  }
+                } catch {
+                  // If not JSON, treat as plain student ID (old format)
+                  studentId = String(raw).trim().toUpperCase()
+                  console.log('Parsed student ID from QR:', studentId)
+                }
+                
+                if (studentId) {
+                  setStudentId(studentId)
                   setTimeout(() => {
                     const form = document.getElementById('scan-form')
                     if (form) form.requestSubmit()
@@ -287,6 +383,30 @@ export default function AttendanceScanner() {
                 </button>
               )}
 
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingQR}
+                className="px-4 py-2 rounded-xl bg-white/80 hover:bg-white border border-white/60 shadow-sm transition-colors disabled:opacity-50"
+              >
+                {uploadingQR ? (
+                  <span className="flex items-center">
+                    <div className="w-4 h-4 border-2 border-gray-600 border-t-transparent rounded-full animate-spin mr-2"></div>
+                    Processing...
+                  </span>
+                ) : (
+                  'Upload QR Image'
+                )}
+              </button>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleQRUpload}
+                className="hidden"
+              />
+
               <div className="text-xs text-gray-500">
                 Tip: QR should contain the Student ID (e.g. CS2024001)
               </div>
@@ -315,8 +435,10 @@ export default function AttendanceScanner() {
         {/* Message Display */}
         {message && (
           <div className={`mt-6 p-4 rounded-xl animate-fadeIn ${
-            messageType === 'success' 
-              ? 'bg-green-50 border border-green-200 text-green-700' 
+            messageType === 'success'
+              ? 'bg-green-50 border border-green-200 text-green-700'
+              : messageType === 'warning'
+              ? 'bg-yellow-50 border border-yellow-200 text-yellow-700'
               : 'bg-red-50 border border-red-200 text-red-700'
           }`}>
             <div className="flex items-center">
@@ -324,9 +446,13 @@ export default function AttendanceScanner() {
                 <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
+              ) : messageType === 'warning' ? (
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
               ) : (
                 <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               )}
               {message}
@@ -336,17 +462,41 @@ export default function AttendanceScanner() {
 
         {/* Success Card with QR Code */}
         {scannedStudent && (
-          <div className="mt-6 p-6 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-xl animate-fadeIn">
+          <div className={`mt-6 p-6 rounded-xl animate-fadeIn ${
+            attendanceStatus === 'Already Present'
+              ? 'bg-gradient-to-r from-yellow-50 to-orange-50 border border-yellow-200'
+              : 'bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200'
+          }`}>
             <div className="flex flex-col md:flex-row items-center gap-6">
               <div className="flex-1 flex items-center space-x-4">
-                <div className="w-12 h-12 bg-gradient-to-r from-green-500 to-emerald-600 rounded-full flex items-center justify-center text-white shadow-lg shrink-0">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
+                <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white shadow-lg shrink-0 ${
+                  attendanceStatus === 'Already Present'
+                    ? 'bg-gradient-to-r from-yellow-500 to-orange-600'
+                    : 'bg-gradient-to-r from-green-500 to-emerald-600'
+                }`}>
+                  {attendanceStatus === 'Already Present' ? (
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
                 </div>
                 <div>
-                  <h3 className="font-bold text-green-900">Attendance Recorded!</h3>
-                  <p className="text-green-700 font-medium">{scannedStudent.name}</p>
+                  <h3 className={`font-bold ${
+                    attendanceStatus === 'Already Present'
+                      ? 'text-yellow-900'
+                      : 'text-green-900'
+                  }`}>
+                    {attendanceStatus === 'Already Present' ? 'Already Present!' : 'Attendance Recorded!'}
+                  </h3>
+                  <p className={`font-medium ${
+                    attendanceStatus === 'Already Present'
+                      ? 'text-yellow-700'
+                      : 'text-green-700'
+                  }`}>{scannedStudent.name}</p>
                   <p className="text-sm text-green-600">{scannedStudent.department}</p>
                   <p className="text-xs text-green-500 font-mono mt-1">ID: {scannedStudent.id} | {scannedStudent.time}</p>
                 </div>

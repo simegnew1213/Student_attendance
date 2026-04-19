@@ -16,3 +16,4 @@ export const attendanceRouter = Router()
 
 attendanceRouter.post('/scan', validateBody(scanAttendanceSchema), controller.scan)
 attendanceRouter.get('/', validateQuery(attendanceQuerySchema), controller.list)
+attendanceRouter.get('/absent', validateQuery(attendanceQuerySchema), controller.getAbsent)

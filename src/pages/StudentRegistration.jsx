@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { http } from '../api/http'
+import { QRCodeSVG } from 'qrcode.react'
 
 // FormField component moved outside to prevent recreation on render
 function FormField({ label, name, required = false, error, children }) {
@@ -29,6 +30,7 @@ export default function StudentRegistration() {
   const [errors, setErrors] = useState({})
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitSuccess, setSubmitSuccess] = useState(false)
+  const [registeredStudent, setRegisteredStudent] = useState(null)
 
   const departments = [
     'Computer Science',
@@ -88,28 +90,26 @@ export default function StudentRegistration() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     const formErrors = validateForm()
-    
+
     if (Object.keys(formErrors).length > 0) {
       setErrors(formErrors)
       return
     }
-    
+
     setIsSubmitting(true)
-    
+
     // Debug: Log the data being sent
     console.log('Sending student data:', formData)
-    
+
     try {
       const response = await http.post('/students', formData)
       console.log('Registration success:', response.data)
+      setRegisteredStudent(formData)
       setSubmitSuccess(true)
-      setTimeout(() => {
-        navigate('/')
-      }, 2000)
     } catch (error) {
       console.error('Registration error:', error)
       let errorMessage = 'Failed to register student. Please try again.'
-      
+
       if (error.response?.data?.message) {
         errorMessage = error.response.data.message
       } else if (error.response?.status === 409) {
@@ -119,7 +119,7 @@ export default function StudentRegistration() {
       } else if (error.code === 'ERR_NETWORK') {
         errorMessage = 'Cannot connect to server. Please check if the backend is running.'
       }
-      
+
       setErrors({ submit: errorMessage })
     } finally {
       setIsSubmitting(false)
@@ -127,6 +127,7 @@ export default function StudentRegistration() {
   }
 
   if (submitSuccess) {
+    const qrData = JSON.stringify(registeredStudent)
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
         <div className="glass rounded-2xl p-8 shadow-xl text-center max-w-md animate-fadeIn">
@@ -136,9 +137,57 @@ export default function StudentRegistration() {
             </svg>
           </div>
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Student Registered Successfully!</h2>
-          <p className="text-gray-600 mb-4">Redirecting to dashboard...</p>
-          <div className="w-full bg-gray-200 rounded-full h-2">
-            <div className="bg-gradient-to-r from-green-500 to-emerald-600 h-2 rounded-full animate-pulse" style={{width: '100%'}}></div>
+          <p className="text-gray-600 mb-4">Scan this QR code for student information</p>
+          
+          <div className="bg-white p-4 rounded-xl shadow-inner mb-4">
+            <QRCodeSVG
+              id="student-qr-code"
+              value={qrData}
+              size={200}
+              level={"H"}
+              includeMargin={true}
+            />
+          </div>
+          
+          <div className="text-left bg-gray-50 rounded-xl p-4 mb-4">
+            <h3 className="font-bold text-gray-900 mb-2">Student Information:</h3>
+            <p className="text-sm text-gray-700"><strong>Name:</strong> {registeredStudent?.fullName}</p>
+            <p className="text-sm text-gray-700"><strong>ID:</strong> {registeredStudent?.studentId}</p>
+            <p className="text-sm text-gray-700"><strong>Department:</strong> {registeredStudent?.department}</p>
+            <p className="text-sm text-gray-700"><strong>Gender:</strong> {registeredStudent?.gender}</p>
+            <p className="text-sm text-gray-700"><strong>Phone:</strong> {registeredStudent?.phoneNumber}</p>
+          </div>
+          
+          <div className="space-y-3">
+            <button
+              onClick={() => {
+                const svg = document.getElementById('student-qr-code')
+                const svgData = new XMLSerializer().serializeToString(svg)
+                const canvas = document.createElement('canvas')
+                const ctx = canvas.getContext('2d')
+                const img = new Image()
+                img.onload = () => {
+                  canvas.width = img.width
+                  canvas.height = img.height
+                  ctx.drawImage(img, 0, 0)
+                  const pngFile = canvas.toDataURL('image/png')
+                  const downloadLink = document.createElement('a')
+                  downloadLink.download = `QR_${registeredStudent?.studentId}.png`
+                  downloadLink.href = pngFile
+                  downloadLink.click()
+                }
+                img.src = 'data:image/svg+xml;base64,' + btoa(svgData)
+              }}
+              className="w-full px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl font-medium hover:shadow-lg transform hover:scale-105 transition-all duration-300"
+            >
+              Download QR Code
+            </button>
+            <button
+              onClick={() => navigate('/')}
+              className="w-full px-4 py-2 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-xl font-medium hover:shadow-lg transform hover:scale-105 transition-all duration-300"
+            >
+              Go to Dashboard
+            </button>
           </div>
         </div>
       </div>
